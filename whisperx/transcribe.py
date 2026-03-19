@@ -160,7 +160,8 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
     # Unload Whisper and VAD
     del model
     gc.collect()
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # Part 2: Align Loop
     if not no_align:
@@ -203,7 +204,8 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         # Unload align model
         del align_model
         gc.collect()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     # >> Diarize
     if diarize:

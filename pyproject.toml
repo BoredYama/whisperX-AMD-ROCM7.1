@@ -5,7 +5,7 @@ name = "whisperx"
 version = "3.8.2"
 description = "Time-Accurate Automatic Speech Recognition using Whisper."
 readme = "README.md"
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.10, <3.13"
 license = { text = "BSD-2-Clause" }
 
 dependencies = [
@@ -17,10 +17,9 @@ dependencies = [
     "pandas>=2.2.3",
     "pyannote-audio>=4.0.0",
     "huggingface-hub<1.0.0",
-    "torch~=2.8.0",
-    "torchaudio~=2.8.0",
+    "torch~=2.10.0",
+    "torchaudio~=2.10.0",
     "transformers>=4.48.0",
-    "triton>=3.3.0; sys_platform == 'linux' and platform_machine == 'x86_64'" # only install triton on x86_64 Linux
 ]
 
 
@@ -39,6 +38,7 @@ include = ["whisperx*"]
 
 # torchcodec (transitive dep of pyannote-audio >=4) has no wheels for Linux aarch64
 [tool.uv]
+index-strategy = "unsafe-best-match"
 override-dependencies = [
     "torchcodec>=0.6.0; (sys_platform == 'linux' and platform_machine == 'x86_64') or sys_platform == 'darwin' or sys_platform == 'win32'",
 ]
@@ -54,14 +54,10 @@ torchaudio = [
   { index = "pytorch-cpu", marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
   { index = "pytorch", marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'" },
 ]
-triton = [
-  { index = "pytorch", marker = "sys_platform == 'linux'" },
-]
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
+url = "https://download.pytorch.org/whl/rocm7.1"
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
