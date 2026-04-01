@@ -161,7 +161,10 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
     del model
     gc.collect()
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     # Part 2: Align Loop
     if not no_align:
@@ -205,7 +208,10 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         del align_model
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     # >> Diarize
     if diarize:
@@ -238,3 +244,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
     for result, audio_path in results:
         result["language"] = align_language
         writer(result, audio_path, writer_args)
+
+    # Force-exit to avoid ROCm/HIP segfaults during Python teardown.
+    # All output files have been written above, so this is safe.
+    os._exit(0)

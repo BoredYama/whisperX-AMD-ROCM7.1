@@ -1,7 +1,7 @@
 <h1 align="center">WhisperX (AMD ROCm Fork)</h1>
 
 <p align="center">
-  <strong>🔴 AMD/ROCm 7.1 Compatible — Linux Only</strong>
+  <strong>🔴 AMD/ROCm 7.2 Compatible — Linux Only</strong>
 </p>
 
 <img width="1216" align="center" alt="whisperx-arch" src="https://raw.githubusercontent.com/m-bain/whisperX/refs/heads/main/figures/pipeline.png">
@@ -13,7 +13,7 @@ This is an AMD/ROCm port of [WhisperX](https://github.com/m-bain/whisperX) — f
 - 🎯 Accurate word-level timestamps using wav2vec2 alignment
 - 👯‍♂️ Multispeaker ASR using speaker diarization from [pyannote-audio](https://github.com/pyannote/pyannote-audio)
 - 🗣️ VAD preprocessing, reduces hallucination & batching with no WER degradation
-- 🔴 **AMD GPU support** via ROCm 7.1
+- 🔴 **AMD GPU support** via ROCm 7.2
 
 ---
 
@@ -21,7 +21,7 @@ This is an AMD/ROCm port of [WhisperX](https://github.com/m-bain/whisperX) — f
 
 - **Linux** (Ubuntu 22.04 or 24.04 recommended)
 - **AMD GPU** (RDNA2/RDNA3 — e.g. RX 6000/7000 series, or Instinct MI series)
-- **ROCm 7.1** installed and working
+- **ROCm 7.2** installed and working
 - **Python 3.10–3.12** (ROCm PyTorch wheels are not available for Python 3.13+)
 
 ### Verify ROCm Installation
@@ -39,7 +39,7 @@ rocm-smi
 hipconfig --full
 ```
 
-If any of these fail, install ROCm 7.1 following the [official AMD guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/).
+If any of these fail, install ROCm 7.2 following the [official AMD guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/).
 
 ---
 
@@ -62,13 +62,13 @@ conda activate whisperx
 conda install -c conda-forge ffmpeg -y
 ```
 
-### Step 3: Install PyTorch with ROCm 7.1
+### Step 3: Install PyTorch with ROCm 7.2
 
 Install PyTorch, torchaudio, and triton-rocm from the official ROCm wheel index:
 
 ```bash
-pip install torch==2.10.0 torchaudio==2.10.0 \
-  --index-url https://download.pytorch.org/whl/rocm7.1
+pip install torch==2.11.0 torchaudio==2.11.0 \
+  --index-url https://download.pytorch.org/whl/rocm7.2
 ```
 
 **Verify PyTorch detects your AMD GPU:**
