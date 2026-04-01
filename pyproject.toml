@@ -2,7 +2,7 @@
 urls = { repository = "https://github.com/m-bain/whisperx" }
 authors = [{ name = "Max Bain" }]
 name = "whisperx"
-version = "3.8.2"
+version = "3.8.5"
 description = "Time-Accurate Automatic Speech Recognition using Whisper."
 readme = "README.md"
 requires-python = ">=3.10, <3.13"
@@ -10,7 +10,7 @@ license = { text = "BSD-2-Clause" }
 
 dependencies = [
     "ctranslate2>=4.5.0",
-    "faster-whisper>=1.1.1",
+    "faster-whisper>=1.2.0",
     "nltk>=3.9.1",
     "numpy>=2.1.0",
     "omegaconf>=2.3.0",
@@ -19,9 +19,14 @@ dependencies = [
     "huggingface-hub<1.0.0",
     "torch~=2.11.0",
     "torchaudio~=2.11.0",
+    "torchvision~=0.26.0",
+    "torchcodec>=0.6.0,<0.8.0; (sys_platform == 'linux' and platform_machine == 'x86_64') or sys_platform == 'darwin' or sys_platform == 'win32'",
     "transformers>=4.48.0",
 ]
 
+
+[project.optional-dependencies]
+dev = ["pytest"]
 
 [project.scripts]
 whisperx = "whisperx.__main__:cli"
@@ -40,7 +45,7 @@ include = ["whisperx*"]
 [tool.uv]
 index-strategy = "unsafe-best-match"
 override-dependencies = [
-    "torchcodec>=0.6.0; (sys_platform == 'linux' and platform_machine == 'x86_64') or sys_platform == 'darwin' or sys_platform == 'win32'",
+    "torchcodec>=0.6.0,<0.8.0; (sys_platform == 'linux' and platform_machine == 'x86_64') or sys_platform == 'darwin' or sys_platform == 'win32'",
 ]
 
 [tool.uv.sources]
