@@ -171,27 +171,21 @@ audio = whisperx.load_audio(audio_file)
 result = model.transcribe(audio, batch_size=batch_size)
 print(result["segments"])  # before alignment
 
-# Free GPU memory
-del model
-gc.collect()
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
+# ⚠️ Note for AMD/ROCm users: Do NOT run `torch.cuda.empty_cache()` or force `gc.collect()`
+# here, as forcing asynchronous stream synchronization can crash the HIP driver.
 
 # 2. Align whisper output
+# ⚠️ Note for AMD/ROCm users: Always load the alignment model on CPU!
+# Running wav2vec2 1D-convolutions on ROCm currently deadlocks the driver randomly.
+align_device = "cpu"
 model_a, metadata = whisperx.load_align_model(
-    language_code=result["language"], device=device
+    language_code=result["language"], device=align_device
 )
 result = whisperx.align(
-    result["segments"], model_a, metadata, audio, device,
+    result["segments"], model_a, metadata, audio, align_device,
     return_char_alignments=False
 )
 print(result["segments"])  # after alignment
-
-# Free GPU memory
-del model_a
-gc.collect()
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
 
 # 3. Assign speaker labels (requires HF token)
 diarize_model = DiarizationPipeline(token="YOUR_HF_TOKEN", device=device)
@@ -258,6 +252,26 @@ For details on batching, alignment, VAD effects, and alignment model choices, se
 - **ROCm support is Linux-only** — no Windows or macOS GPU support
 
 ---
+
+## Troubleshooting AMD/ROCm Issues
+
+### 1. "torchcodec is not installed correctly" Warning
+You may see a large warning telling you `torchcodec` cannot load `libtorchcodec_core7.so` from pyannote:
+- **Cause:** The `torchcodec` library is meant to speed up audio loading, but it lacks AMD ROCm linux wheels.
+- **Solution:** You can safely ignore this. The pipeline gracefully falls back to using standard `torchaudio`. If the warning logs bother you, uninstall it: `pip uninstall torchcodec -y`.
+
+### 2. Process Gets "Stuck" Forever at 100% Progress
+- **Cause:** Using `torch.cuda.empty_cache()` and manual garbage collection causes fatal deadlocks in AMD's HIP driver during asynchronous Python teardowns. Furthermore, the 1D ROCm convolution within `wav2vec2` alignment silently crashes on irregular chunk sizes.
+- **Solution:** Our fork's `transcribe.py` already patches this by omitting explicit memory collection and forcing alignment onto the CPU behind the scenes. If you are writing custom Python scripts, **always run alignment on `cpu`** and **do not** call `empty_cache()`.
+
+### 3. Transcript output is one giant long paragraph
+- **Solution:** You didn't give formatting rules to the CLI! To force clean 2-line subtitle boxes, append:
+  `--max_line_width 42 --max_line_count 2`
+
+### 4. Whispers Hallucinates or Gets Stuck Repeating the Same Word
+- **Cause:** Giving the CLI arguments that strip context or force greedy decoding (like `--beam_size 1` or `--condition_on_previous_text False`).
+- **Solution:** Use quality-preserving arguments: 
+  `--beam_size 5 --condition_on_previous_text True --compression_ratio_threshold 2.0`
 
 ## Acknowledgements 🙏
 

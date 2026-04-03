@@ -158,20 +158,21 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         results.append((result, audio_path))
 
     # Unload Whisper and VAD
-    del model
-    gc.collect()
-    if torch.cuda.is_available():
-        try:
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
+    # Disabled for ROCm: del model, gc.collect() can deadlock the HIP driver
+    pass
+    # torch.cuda.empty_cache() Disabled for ROCm to avoid deadlocks
+    pass
 
     # Part 2: Align Loop
     if not no_align:
         tmp_results = results
         results = []
+        
+        # Hard-force alignment onto CPU to bypass ROCm wav2vec2 deadlocks
+        align_device = "cpu" if hasattr(torch.version, "hip") or device.startswith("cuda") else device
+        
         align_model, align_metadata = load_align_model(
-            align_language, device, model_name=align_model, model_dir=model_dir, model_cache_only=model_cache_only
+            align_language, align_device, model_name=align_model, model_dir=model_dir, model_cache_only=model_cache_only
         )
         for result, audio_path in tmp_results:
             # >> Align
@@ -188,7 +189,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
                         f"New language found ({result['language']})! Previous was ({align_metadata['language']}), loading new alignment model for new language..."
                     )
                     align_model, align_metadata = load_align_model(
-                        result["language"], device, model_dir=model_dir, model_cache_only=model_cache_only
+                        result["language"], align_device, model_dir=model_dir, model_cache_only=model_cache_only
                     )
                 logger.info("Performing alignment...")
                 result: AlignedTranscriptionResult = align(
@@ -196,7 +197,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
                     align_model,
                     align_metadata,
                     input_audio,
-                    device,
+                    align_device,
                     interpolate_method=interpolate_method,
                     return_char_alignments=return_char_alignments,
                     print_progress=print_progress,
@@ -205,13 +206,10 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
             results.append((result, audio_path))
 
         # Unload align model
-        del align_model
-        gc.collect()
-        if torch.cuda.is_available():
-            try:
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
+        # Disabled for ROCm: del align_model, gc.collect() can deadlock the HIP driver
+        pass
+    # torch.cuda.empty_cache() Disabled for ROCm to avoid deadlocks
+    pass
 
     # >> Diarize
     if diarize:
