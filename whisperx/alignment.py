@@ -204,15 +204,23 @@ def align(
 
     aligned_segments: List[SingleAlignedSegment] = []
 
+    # Maximum segment duration (seconds) to attempt GPU alignment.
+    # MATH-only SDPA scales O(n²) with length; segments beyond this threshold
+    # are too slow and will use interpolated timestamps instead.
+    MAX_ALIGN_SEGMENT_DURATION = 30.0
+
     # 2. Get prediction matrix from alignment model & align
     for sdx, segment in enumerate(transcript):
-        if print_progress:
-            print(f"Aligning... [{sdx + 1}/{total_segments}]", end="\r", flush=True)
 
         t1 = segment["start"]
         t2 = segment["end"]
         text = segment["text"]
         avg_logprob = segment.get("avg_logprob")
+
+        seg_duration = t2 - t1
+
+        if print_progress:
+            print(f"Aligning... [{sdx + 1}/{total_segments}] ({seg_duration:.1f}s)", end="\r", flush=True)
 
         aligned_seg: SingleAlignedSegment = {
             "start": t1,
@@ -236,6 +244,12 @@ def align(
 
         if t1 >= MAX_DURATION:
             logger.warning(f'Failed to align segment ("{segment["text"]}"): original start time longer than audio duration, skipping')
+            aligned_segments.append(aligned_seg)
+            continue
+
+        # Skip alignment for very long segments to avoid O(n²) MATH SDPA stalls
+        if seg_duration > MAX_ALIGN_SEGMENT_DURATION:
+            logger.warning(f'Skipping alignment for {seg_duration:.1f}s segment (>{MAX_ALIGN_SEGMENT_DURATION}s): using interpolated timestamps')
             aligned_segments.append(aligned_seg)
             continue
 
@@ -265,6 +279,10 @@ def align(
                 else:
                     raise NotImplementedError(f"Align model of type {model_type} not supported.")
                 emissions = torch.log_softmax(emissions, dim=-1)
+
+        # Force GPU synchronization to prevent command queue saturation
+        if device != "cpu" and torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         emission = emissions[0].cpu().detach()
 
