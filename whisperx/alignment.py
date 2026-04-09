@@ -5,10 +5,10 @@ C. Max Bain
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union, List
 
+import os
 import numpy as np
 import pandas as pd
 import torch
-from torch.nn.attention import sdpa_kernel, SDPBackend
 import torchaudio
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
@@ -130,6 +130,12 @@ def align(
     Align phoneme recognition predictions to known transcription.
     """
 
+    # Enable experimental flash attention on AMD GPUs (ROCm 7.x)
+    # This must be set before any SDPA call to prevent the driver from
+    # falling back to the O(n²) MATH kernel.
+    if hasattr(torch.version, "hip"):
+        os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = "1"
+
     if not torch.is_tensor(audio):
         if isinstance(audio, str):
             audio = load_audio(audio)
@@ -204,10 +210,22 @@ def align(
 
     aligned_segments: List[SingleAlignedSegment] = []
 
-    # Maximum segment duration (seconds) to attempt GPU alignment.
-    # MATH-only SDPA scales O(n²) with length; segments beyond this threshold
-    # are too slow and will use interpolated timestamps instead.
-    MAX_ALIGN_SEGMENT_DURATION = 30.0
+    # Pre-warm the ROCm flash attention JIT compiler by running dummy
+    # inferences at various lengths.  Without this, the first encounter
+    # of each unique tensor shape triggers a slow JIT compilation that
+    # can take 5-12 s.  After warmup every shape hits the kernel cache.
+    if device != "cpu" and hasattr(torch.version, "hip"):
+        logger.info("Pre-warming ROCm flash attention kernels...")
+        with torch.inference_mode():
+            for dur in range(1, 31):
+                _wav = torch.randn(1, SAMPLE_RATE * dur, device=device)
+                if model_type == "torchaudio":
+                    model(_wav)
+                elif model_type == "huggingface":
+                    model(_wav)
+                del _wav
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
 
     # 2. Get prediction matrix from alignment model & align
     for sdx, segment in enumerate(transcript):
@@ -247,12 +265,6 @@ def align(
             aligned_segments.append(aligned_seg)
             continue
 
-        # Skip alignment for very long segments to avoid O(n²) MATH SDPA stalls
-        if seg_duration > MAX_ALIGN_SEGMENT_DURATION:
-            logger.warning(f'Skipping alignment for {seg_duration:.1f}s segment (>{MAX_ALIGN_SEGMENT_DURATION}s): using interpolated timestamps')
-            aligned_segments.append(aligned_seg)
-            continue
-
         text_clean = "".join(segment_data[sdx]["clean_char"])
 
         f1 = int(t1 * SAMPLE_RATE)
@@ -270,15 +282,13 @@ def align(
             lengths = None
 
         with torch.inference_mode():
-            # Force MATH-only SDPA to prevent ROCm experimental flash/mem-efficient attention deadlocks
-            with sdpa_kernel(SDPBackend.MATH):
-                if model_type == "torchaudio":
-                    emissions, _ = model(waveform_segment.to(device), lengths=lengths)
-                elif model_type == "huggingface":
-                    emissions = model(waveform_segment.to(device)).logits
-                else:
-                    raise NotImplementedError(f"Align model of type {model_type} not supported.")
-                emissions = torch.log_softmax(emissions, dim=-1)
+            if model_type == "torchaudio":
+                emissions, _ = model(waveform_segment.to(device), lengths=lengths)
+            elif model_type == "huggingface":
+                emissions = model(waveform_segment.to(device)).logits
+            else:
+                raise NotImplementedError(f"Align model of type {model_type} not supported.")
+            emissions = torch.log_softmax(emissions, dim=-1)
 
         # Force GPU synchronization to prevent command queue saturation
         if device != "cpu" and torch.cuda.is_available():
