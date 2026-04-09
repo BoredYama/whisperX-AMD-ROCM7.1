@@ -204,6 +204,42 @@ def align(
 
     aligned_segments: List[SingleAlignedSegment] = []
 
+    # One-time warmup: pre-compile ROCm flash attention kernels for all
+    # common segment durations (1-30s). The compiled kernels are persisted
+    # in ~/.triton/cache/ and survive across process restarts, so this
+    # only runs once per environment. A marker file tracks completion.
+    if device != "cpu" and hasattr(torch.version, "hip"):
+        _marker = os.path.join(
+            os.path.expanduser("~"), ".cache", "whisperx_rocm_kernels_compiled"
+        )
+        if not os.path.exists(_marker):
+            logger.info(
+                "First-time ROCm kernel compilation (this only happens once)..."
+            )
+            with torch.inference_mode():
+                for dur in range(1, 31):
+                    _wav = torch.randn(1, SAMPLE_RATE * dur, device=device)
+                    if model_type == "torchaudio":
+                        model(_wav)
+                    elif model_type == "huggingface":
+                        model(_wav)
+                    del _wav
+                    if print_progress:
+                        print(
+                            f"Compiling kernels... [{dur}/30]",
+                            end="\r",
+                            flush=True,
+                        )
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            # Write marker so we never run this again
+            os.makedirs(os.path.dirname(_marker), exist_ok=True)
+            with open(_marker, "w") as f:
+                f.write("done\n")
+            if print_progress:
+                print()  # newline after progress
+            logger.info("Kernel compilation complete — cached for future runs.")
+
     # 2. Get prediction matrix from alignment model & align
     for sdx, segment in enumerate(transcript):
 
