@@ -253,13 +253,15 @@ def align(
             lengths = None
 
         with torch.inference_mode():
-            if model_type == "torchaudio":
-                emissions, _ = model(waveform_segment.to(device), lengths=lengths)
-            elif model_type == "huggingface":
-                emissions = model(waveform_segment.to(device)).logits
-            else:
-                raise NotImplementedError(f"Align model of type {model_type} not supported.")
-            emissions = torch.log_softmax(emissions, dim=-1)
+            # Force mathematical SDPA to bypass experimental ROCm SDPA deadlocks on RDNA GPUs
+            with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
+                if model_type == "torchaudio":
+                    emissions, _ = model(waveform_segment.to(device), lengths=lengths)
+                elif model_type == "huggingface":
+                    emissions = model(waveform_segment.to(device)).logits
+                else:
+                    raise NotImplementedError(f"Align model of type {model_type} not supported.")
+                emissions = torch.log_softmax(emissions, dim=-1)
 
         emission = emissions[0].cpu().detach()
 
