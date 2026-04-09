@@ -8,6 +8,7 @@ from typing import Iterable, Optional, Union, List
 import numpy as np
 import pandas as pd
 import torch
+from torch.nn.attention import sdpa_kernel, SDPBackend
 import torchaudio
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
@@ -255,13 +256,15 @@ def align(
             lengths = None
 
         with torch.inference_mode():
-            if model_type == "torchaudio":
-                emissions, _ = model(waveform_segment.to(device), lengths=lengths)
-            elif model_type == "huggingface":
-                emissions = model(waveform_segment.to(device)).logits
-            else:
-                raise NotImplementedError(f"Align model of type {model_type} not supported.")
-            emissions = torch.log_softmax(emissions, dim=-1)
+            # Force MATH-only SDPA to prevent ROCm experimental flash/mem-efficient attention deadlocks
+            with sdpa_kernel(SDPBackend.MATH):
+                if model_type == "torchaudio":
+                    emissions, _ = model(waveform_segment.to(device), lengths=lengths)
+                elif model_type == "huggingface":
+                    emissions = model(waveform_segment.to(device)).logits
+                else:
+                    raise NotImplementedError(f"Align model of type {model_type} not supported.")
+                emissions = torch.log_softmax(emissions, dim=-1)
 
         emission = emissions[0].cpu().detach()
 

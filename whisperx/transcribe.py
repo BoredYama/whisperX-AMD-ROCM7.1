@@ -168,17 +168,8 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         tmp_results = results
         results = []
         
-        # Hard-force alignment onto CPU to bypass ROCm wav2vec2 deadlocks
-        align_device = "cpu" if hasattr(torch.version, "hip") or device.startswith("cuda") else device
-        
-        # Maximize CPU threads for alignment performance
-        if align_device == "cpu":
-            _prev_threads = torch.get_num_threads()
-            torch.set_num_threads(os.cpu_count() or _prev_threads)
-            logger.info(f"Alignment forced to CPU ({torch.get_num_threads()} threads) to bypass ROCm driver deadlocks")
-        
         align_model, align_metadata = load_align_model(
-            align_language, align_device, model_name=align_model, model_dir=model_dir, model_cache_only=model_cache_only
+            align_language, device, model_name=align_model, model_dir=model_dir, model_cache_only=model_cache_only
         )
         for result, audio_path in tmp_results:
             # >> Align
@@ -195,7 +186,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
                         f"New language found ({result['language']})! Previous was ({align_metadata['language']}), loading new alignment model for new language..."
                     )
                     align_model, align_metadata = load_align_model(
-                        result["language"], align_device, model_dir=model_dir, model_cache_only=model_cache_only
+                        result["language"], device, model_dir=model_dir, model_cache_only=model_cache_only
                     )
                 logger.info("Performing alignment...")
                 result: AlignedTranscriptionResult = align(
@@ -203,7 +194,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
                     align_model,
                     align_metadata,
                     input_audio,
-                    align_device,
+                    device,
                     interpolate_method=interpolate_method,
                     return_char_alignments=return_char_alignments,
                     print_progress=print_progress,
