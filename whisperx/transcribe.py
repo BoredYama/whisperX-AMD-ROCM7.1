@@ -158,10 +158,12 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         results.append((result, audio_path))
 
     # Unload Whisper and VAD
-    # Disabled for ROCm: del model, gc.collect() can deadlock the HIP driver
-    pass
-    # torch.cuda.empty_cache() Disabled for ROCm to avoid deadlocks
-    pass
+    # Synchronize GPU first to ensure all async ops complete, then clean up.
+    # This prevents the race conditions that caused deadlocks with earlier ROCm versions.
+    if device != "cpu" and torch.cuda.is_available():
+        torch.cuda.synchronize()
+    del model
+    gc.collect()
 
     # Part 2: Align Loop
     if not no_align:
@@ -203,10 +205,10 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
             results.append((result, audio_path))
 
         # Unload align model
-        # Disabled for ROCm: del align_model, gc.collect() can deadlock the HIP driver
-        pass
-    # torch.cuda.empty_cache() Disabled for ROCm to avoid deadlocks
-    pass
+        if device != "cpu" and torch.cuda.is_available():
+            torch.cuda.synchronize()
+        del align_model
+        gc.collect()
 
     # >> Diarize
     if diarize:
@@ -240,6 +242,16 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         result["language"] = align_language
         writer(result, audio_path, writer_args)
 
-    # Force-exit to avoid ROCm/HIP segfaults during Python teardown.
-    # All output files have been written above, so this is safe.
+    # Graceful GPU cleanup before forced exit.
+    # synchronize() ensures all GPU work is done, then we release the HIP context
+    # properly so the ROCm driver doesn't leak resources across process invocations.
+    if device != "cpu" and torch.cuda.is_available():
+        try:
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+    # Force-exit to avoid ROCm/HIP segfaults during Python's atexit teardown.
+    # All output files have been written and GPU resources released above.
     os._exit(0)
