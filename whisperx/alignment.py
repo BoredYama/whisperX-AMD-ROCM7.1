@@ -205,6 +205,8 @@ def align(
 
     # 2. Get prediction matrix from alignment model & align
     for sdx, segment in enumerate(transcript):
+        if print_progress:
+            print(f"Aligning... [{sdx + 1}/{total_segments}]", end="\r", flush=True)
 
         t1 = segment["start"]
         t2 = segment["end"]
@@ -253,15 +255,13 @@ def align(
             lengths = None
 
         with torch.inference_mode():
-            # Force mathematical SDPA to bypass experimental ROCm SDPA deadlocks on RDNA GPUs
-            with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
-                if model_type == "torchaudio":
-                    emissions, _ = model(waveform_segment.to(device), lengths=lengths)
-                elif model_type == "huggingface":
-                    emissions = model(waveform_segment.to(device)).logits
-                else:
-                    raise NotImplementedError(f"Align model of type {model_type} not supported.")
-                emissions = torch.log_softmax(emissions, dim=-1)
+            if model_type == "torchaudio":
+                emissions, _ = model(waveform_segment.to(device), lengths=lengths)
+            elif model_type == "huggingface":
+                emissions = model(waveform_segment.to(device)).logits
+            else:
+                raise NotImplementedError(f"Align model of type {model_type} not supported.")
+            emissions = torch.log_softmax(emissions, dim=-1)
 
         emission = emissions[0].cpu().detach()
 
