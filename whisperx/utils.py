@@ -225,6 +225,7 @@ class ResultWriter:
             self.output_dir, audio_basename + "." + self.extension
         )
 
+        os.makedirs(self.output_dir, exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             self.write_result(result, file=f, options=options)
 
