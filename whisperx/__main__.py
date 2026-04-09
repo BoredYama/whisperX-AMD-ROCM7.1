@@ -1,6 +1,11 @@
 import argparse
 import importlib.metadata
+import os
 import platform
+
+# Enable experimental ROCm flash attention before any torch import.
+# This must happen before torch initializes the HIP backend.
+os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 import torch
 

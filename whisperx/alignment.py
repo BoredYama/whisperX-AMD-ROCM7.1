@@ -130,12 +130,6 @@ def align(
     Align phoneme recognition predictions to known transcription.
     """
 
-    # Enable experimental flash attention on AMD GPUs (ROCm 7.x)
-    # This must be set before any SDPA call to prevent the driver from
-    # falling back to the O(n²) MATH kernel.
-    if hasattr(torch.version, "hip"):
-        os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = "1"
-
     if not torch.is_tensor(audio):
         if isinstance(audio, str):
             audio = load_audio(audio)
@@ -209,23 +203,6 @@ def align(
         }
 
     aligned_segments: List[SingleAlignedSegment] = []
-
-    # Pre-warm the ROCm flash attention JIT compiler by running dummy
-    # inferences at various lengths.  Without this, the first encounter
-    # of each unique tensor shape triggers a slow JIT compilation that
-    # can take 5-12 s.  After warmup every shape hits the kernel cache.
-    if device != "cpu" and hasattr(torch.version, "hip"):
-        logger.info("Pre-warming ROCm flash attention kernels...")
-        with torch.inference_mode():
-            for dur in range(1, 31):
-                _wav = torch.randn(1, SAMPLE_RATE * dur, device=device)
-                if model_type == "torchaudio":
-                    model(_wav)
-                elif model_type == "huggingface":
-                    model(_wav)
-                del _wav
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
 
     # 2. Get prediction matrix from alignment model & align
     for sdx, segment in enumerate(transcript):
