@@ -62,13 +62,18 @@ conda activate whisperx
 conda install -c conda-forge ffmpeg -y
 ```
 
-### Step 3: Install PyTorch with ROCm 7.2
+### Step 3: Install PyTorch with ROCm
 
-Install PyTorch, torchaudio, and triton-rocm from the official ROCm wheel index:
+Install PyTorch and torchaudio from the official ROCm wheel index:
 
 ```bash
+# For ROCm 7.2:
 pip install torch==2.11.0 torchaudio==2.11.0 \
   --index-url https://download.pytorch.org/whl/rocm7.2
+
+# For ROCm 7.12 Preview:
+pip install torch torchaudio \
+  --index-url https://download.pytorch.org/whl/rocm7.12
 ```
 
 **Verify PyTorch detects your AMD GPU:**
@@ -155,6 +160,10 @@ whisperx path/to/audio.wav --compute_type int8 --device cpu
 ### Python Usage
 
 ```python
+import os
+# Must be set before importing torch on AMD GPUs
+os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = "1"
+
 import whisperx
 import gc
 import torch
@@ -171,21 +180,24 @@ audio = whisperx.load_audio(audio_file)
 result = model.transcribe(audio, batch_size=batch_size)
 print(result["segments"])  # before alignment
 
-# ⚠️ Note for AMD/ROCm users: Do NOT run `torch.cuda.empty_cache()` or force `gc.collect()`
-# here, as forcing asynchronous stream synchronization can crash the HIP driver.
+# Cleanup: synchronize GPU before deleting to avoid HIP race conditions
+torch.cuda.synchronize()
+del model
+gc.collect()
 
-# 2. Align whisper output
-# ⚠️ Note for AMD/ROCm users: Always load the alignment model on CPU!
-# Running wav2vec2 1D-convolutions on ROCm currently deadlocks the driver randomly.
-align_device = "cpu"
+# 2. Align whisper output (runs on GPU with flash attention)
 model_a, metadata = whisperx.load_align_model(
-    language_code=result["language"], device=align_device
+    language_code=result["language"], device=device
 )
 result = whisperx.align(
-    result["segments"], model_a, metadata, audio, align_device,
+    result["segments"], model_a, metadata, audio, device,
     return_char_alignments=False
 )
 print(result["segments"])  # after alignment
+
+torch.cuda.synchronize()
+del model_a
+gc.collect()
 
 # 3. Assign speaker labels (requires HF token)
 diarize_model = DiarizationPipeline(token="YOUR_HF_TOKEN", device=device)
@@ -260,18 +272,22 @@ You may see a large warning telling you `torchcodec` cannot load `libtorchcodec_
 - **Cause:** The `torchcodec` library is meant to speed up audio loading, but it lacks AMD ROCm linux wheels.
 - **Solution:** You can safely ignore this. The pipeline gracefully falls back to using standard `torchaudio`. If the warning logs bother you, uninstall it: `pip uninstall torchcodec -y`.
 
-### 2. Process Gets "Stuck" Forever at 100% Progress
-- **Cause:** Using `torch.cuda.empty_cache()` and manual garbage collection causes fatal deadlocks in AMD's HIP driver during asynchronous Python teardowns. Furthermore, the 1D ROCm convolution within `wav2vec2` alignment silently crashes on irregular chunk sizes.
-- **Solution:** Our fork's `transcribe.py` already patches this by omitting explicit memory collection and forcing alignment onto the CPU behind the scenes. If you are writing custom Python scripts, **always run alignment on `cpu`** and **do not** call `empty_cache()`.
+### 2. First Run Is Slower Than Subsequent Runs
+- **Cause:** On the very first run, ROCm's AOTriton JIT compiler needs to compile flash attention kernels for wav2vec2 alignment. These are cached to `~/.triton/cache/` and reused forever after.
+- **Solution:** This is a one-time cost (~1-2 min extra). All subsequent runs will be fast. If you need to reset the cache: `rm -f ~/.cache/whisperx_rocm_kernels_compiled`
 
 ### 3. Transcript output is one giant long paragraph
 - **Solution:** You didn't give formatting rules to the CLI! To force clean 2-line subtitle boxes, append:
   `--max_line_width 42 --max_line_count 2`
 
-### 4. Whispers Hallucinates or Gets Stuck Repeating the Same Word
+### 4. Whisper Hallucinates or Gets Stuck Repeating the Same Word
 - **Cause:** Giving the CLI arguments that strip context or force greedy decoding (like `--beam_size 1` or `--condition_on_previous_text False`).
 - **Solution:** Use quality-preserving arguments: 
   `--beam_size 5 --condition_on_previous_text True --compression_ratio_threshold 2.0`
+
+### 5. "xnack 'Off' was requested" Warning
+- **Cause:** XNACK is a memory-paging feature for datacenter Instinct GPUs. Consumer RDNA cards don't support it.
+- **Solution:** Completely harmless — ignore it.
 
 ## Acknowledgements 🙏
 
@@ -293,4 +309,3 @@ This is a ROCm port of [WhisperX](https://github.com/m-bain/whisperX) by Max Bai
   year={2023}
 }
 ```
-<parameter name="Complexity">7
