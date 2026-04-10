@@ -285,14 +285,28 @@ def align(
 
         # TODO: Probably can get some speedup gain with batched inference here
         waveform_segment = audio[:, f1:f2]
+
+        # Pad waveform to the next whole-second boundary.
+        # This quantizes all tensor shapes to multiples of SAMPLE_RATE,
+        # ensuring they always hit pre-compiled ROCm flash attention kernels
+        # instead of triggering expensive JIT recompilation for each
+        # unique frame count.
+        actual_len = waveform_segment.shape[-1]
+        padded_len = ((actual_len + SAMPLE_RATE - 1) // SAMPLE_RATE) * SAMPLE_RATE
+        padded_len = max(padded_len, SAMPLE_RATE)  # at least 1 second
+
         # Handle the minimum input length for wav2vec2 models
-        if waveform_segment.shape[-1] < 400:
-            lengths = torch.as_tensor([waveform_segment.shape[-1]]).to(device)
+        if actual_len < 400:
+            lengths = torch.as_tensor([actual_len]).to(device)
             waveform_segment = torch.nn.functional.pad(
-                waveform_segment, (0, 400 - waveform_segment.shape[-1])
+                waveform_segment, (0, padded_len - actual_len)
             )
         else:
             lengths = None
+            if padded_len > actual_len:
+                waveform_segment = torch.nn.functional.pad(
+                    waveform_segment, (0, padded_len - actual_len)
+                )
 
         with torch.inference_mode():
             if model_type == "torchaudio":
